@@ -9,8 +9,11 @@ Ollama `keep_alive`，推理结束后模型在显存中只驻留一小段时间�
 
 - 安装时（`patch/apply.mjs`）给 `@deepseek-ai/dsh-host-apiproxy` 打一个幂等补丁：
   `sessions.prompt` 里原本「模型不支持图片 → 拒绝」的分支，改为先调本地
-  Ollama VL 模型（默认 `qwen3-vl:8b`）生成图片描述，再把消息发出去；
-  桥接未配置或 Ollama 不可用时回退到 DSH 原有的拒绝行为。
+  Ollama VL 模型（默认 `qwen3-vl:8b`）生成图片描述，再发送消息：
+  - **你的消息保持原样**（图片 + 你的文字，一个字都不改）；
+  - VL 描述作为**独立的「上下文注入」消息**（`source: { kind: "plugin" }`）送进对话，
+    界面显示为可折叠的“上下文注入”条目，模型能读到、你的气泡不被污染；
+  - 桥接未配置或 Ollama 不可用时回退到 DSH 原有的拒绝行为。
 - 运行时（`lib/index.js`）是一个极小且不会抛错的 Cordis 行，启动时检查补丁/配置
   状态并打印日志，也提供 `/vision-bridge` 状态命令（若 commands 服务存在）。
 - 包声明了 `dsh.bundle.patch`，`dsh plugin add` 后会自动挂进 profile 的
