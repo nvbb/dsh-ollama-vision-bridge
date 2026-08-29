@@ -46,7 +46,7 @@ node "$env:USERPROFILE\.dsh\profiles\node_modules\dsh-ollama-vision-bridge\patch
 `apply.mjs` 做四件事（幂等，可重复跑）：
 1. 补丁 `dsh-host-apiproxy`（已打则跳过）；
 2. `settings.yaml` 追加 `llm-pi-ai` 提供商 `ollama`（已有该段则跳过）；
-3. 生成 `vision-bridge.yaml`（已存在则保留你的修改）；
+3. `settings.yaml` 追加 `vision-bridge` 段（已有该段则跳过；兼容旧的 `vision-bridge.yaml`）；
 4. 检查 `OLLAMA_MODELS` 下有没有 VL 模型 manifest，没有就给出提示。
 
 ## DSH 更新后
@@ -60,18 +60,25 @@ node "$env:USERPROFILE\.dsh\profiles\node_modules\dsh-ollama-vision-bridge\patch
 
 ## 配置
 
-`$DSH_HOME\vision-bridge.yaml`（默认 `C:\Users\Administrator\.dsh\vision-bridge.yaml`）：
+配置在 **DSH 的设置文档** `$DSH_HOME\settings.yaml` 的 `vision-bridge:` 段
+（与 `llm-pi-ai` 同款，**热加载**，改完即生效，不用重启；旧的独立
+`vision-bridge.yaml` 仍作为兼容回退，优先读 settings.yaml）：
 
 ```yaml
-baseURL: http://127.0.0.1:11434
-model: "qwen3-vl:8b"
-keepAlive: "60s"   # 显存冷却：空闲 60s 后 VL 模型自动卸载；0 = 推理完立即卸载
-# prompt: 自定义描述提示词（可选）
+vision-bridge:
+  enabled: true                     # 总开关；false 时文本模型发图恢复 DSH 原生拒绝
+  baseURL: http://127.0.0.1:11434   # Ollama 地址
+  model: "qwen3-vl:8b"              # 默认兜底 VL 模型
+  keepAlive: "60s"                  # 显存冷却：空闲 60s 后卸载；0 = 推理完立即卸载
+  # models:                         # 按模型映射（可选，覆盖默认）：选中这些文本模型发图时用对应 VL 模型
+  #   "deepseek-v4-flash": "qwen3-vl:8b"
+  # prompt: 自定义描述提示词（可选）
+  # timeoutMs: 300000
 ```
 
 环境变量可覆盖：`DSH_VISION_BRIDGE_BASE_URL` / `DSH_VISION_BRIDGE_MODEL` /
-`DSH_VISION_BRIDGE_KEEP_ALIVE`。删除 `vision-bridge.yaml`（或置空 `model`）即
-关闭桥接，恢复 DSH 原生拒绝行为。
+`DSH_VISION_BRIDGE_KEEP_ALIVE`。删除 `vision-bridge` 段（或置空 `model`、或
+`enabled: false`）即关闭桥接，恢复 DSH 原生拒绝行为。
 
 前提：Ollama 在跑（`ollama list` 能看到模型），模型目录环境变量
 `OLLAMA_MODELS` 指向含 `qwen3-vl:8b` 的目录。
