@@ -1,6 +1,6 @@
 {
   "name": "dsh-ollama-vision-bridge",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "DSH vision bridge: when the selected chat model is text-only, attached images are described by a local Ollama VL model (qwen3-vl:8b) with keep_alive VRAM cooling. Install-time patch + runtime status companion.",
   "type": "module",
   "main": "lib/index.js",
