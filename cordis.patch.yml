@@ -1,0 +1,7 @@
+# dsh-ollama-vision-bridge: runtime companion row.
+# The heavy lifting (patching dsh-host-apiproxy, writing settings) is done by
+# patch/apply.mjs at install time; this row only reports status at boot and
+# never throws, so removing the package is safe.
+- insert:
+    - id: vision-bridge
+      name: 'dsh-ollama-vision-bridge'

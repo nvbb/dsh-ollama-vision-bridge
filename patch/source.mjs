@@ -1,0 +1,164 @@
+/**
+ * dsh-ollama-vision-bridge — patch source of truth.
+ *
+ * The exact JS inserted into @deepseek-ai/dsh-host-apiproxy/lib/index.js, kept
+ * here as arrays of lines so patch/apply.mjs can insert them byte-exact and
+ * so the re-apply logic stays version-agnostic (it locates stable anchors in
+ * the target file rather than patching by line numbers).
+ *
+ * If a future dsh release renames/removes the anchors, apply.mjs reports a
+ * clear "anchors not found" error — bump this package then.
+ */
+
+export const MARKER = "VISION BRIDGE PATCH";
+
+/** Anchor: insert helpers immediately before this function definition. */
+export const ANCHOR_DURABLE_PROMPT = "async function durablePromptContent(ctx, content)";
+
+/** Anchor (regex): the single-line image-modality refusal in the prompt RPC. */
+export const ANCHOR_REFUSAL = /if \(modelInfo\.inputModalities !== void 0 && !modelInfo\.inputModalities\.includes\("image"\)\) return err\(request/;
+
+/**
+ * Helper functions inserted before durablePromptContent. Reads
+ * $DSH_HOME/vision-bridge.yaml (or env DSH_VISION_BRIDGE_BASE_URL /
+ * DSH_VISION_BRIDGE_MODEL / DSH_VISION_BRIDGE_KEEP_ALIVE), describes each
+ * image through the local Ollama VL model, keeps the image blocks in history
+ * and appends a text block with the description. Returns null when the bridge
+ * is unavailable so callers keep the original refusal behavior.
+ */
+export const HELPER_LINES = [
+'/** VISION BRIDGE PATCH (dsh-ollama-vision-bridge): describe attached images with a local',
+' * Ollama VL model when the selected chat model is text-only. Reads',
+' * $DSH_HOME/vision-bridge.yaml (or env DSH_VISION_BRIDGE_BASE_URL /',
+' * DSH_VISION_BRIDGE_MODEL / DSH_VISION_BRIDGE_KEEP_ALIVE). Returns null when',
+' * the bridge is unavailable, in which case callers keep the original',
+' * refusal behavior. */',
+'async function visionBridgeConfig() {',
+'	const envBase = process.env.DSH_VISION_BRIDGE_BASE_URL;',
+'	const envModel = process.env.DSH_VISION_BRIDGE_MODEL;',
+'	const envKeep = process.env.DSH_VISION_BRIDGE_KEEP_ALIVE;',
+'	if (envBase !== void 0 || envModel !== void 0) {',
+'		if (typeof envModel !== "string" || envModel === "") return null;',
+'		return { baseURL: typeof envBase === "string" && envBase !== "" ? envBase : "http://127.0.0.1:11434", model: envModel, keepAlive: typeof envKeep === "string" && envKeep !== "" ? envKeep : "60s" };',
+'	}',
+'	try {',
+'		const { readFile } = await import("node:fs/promises");',
+'		const { join } = await import("node:path");',
+'		const home = process.env.DSH_HOME ?? join(homedir(), ".dsh");',
+'		const text = await readFile(join(home, "vision-bridge.yaml"), "utf8");',
+'		const yaml = await import("js-yaml");',
+'		const doc = yaml.load(text);',
+'		if (doc !== null && typeof doc === "object" && typeof doc.model === "string" && doc.model !== "") {',
+'			return {',
+'				baseURL: typeof doc.baseURL === "string" && doc.baseURL !== "" ? doc.baseURL : "http://127.0.0.1:11434",',
+'				model: doc.model,',
+'				keepAlive: typeof doc.keepAlive === "string" ? doc.keepAlive : typeof doc.keepAlive === "number" ? doc.keepAlive : "60s",',
+'				prompt: typeof doc.prompt === "string" ? doc.prompt : void 0,',
+'				timeoutMs: Number.isFinite(doc.timeoutMs) ? doc.timeoutMs : 300000',
+'			};',
+'		}',
+'	} catch {',
+'		// bridge config unreadable or absent; bridge stays off',
+'	}',
+'	return null;',
+'}',
+'/** Ask the local Ollama VL model to describe one data-URI image. */',
+'async function ollamaVisionDescribe(cfg, dataUri) {',
+'	const base = String(cfg.baseURL).replace(/\/v1\/?$/, "");',
+'	const prompt = cfg.prompt ?? "\u8bf7\u7528\u4e2d\u6587\u7b80\u8981\u3001\u51c6\u786e\u5730\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u7684\u5185\u5bb9\uff0c\u5305\u62ec\u4e3b\u8981\u5143\u7d20\u3001\u6587\u5b57\u3001\u5e03\u5c40\u4e0e\u5173\u7cfb\u3002\u63a7\u5236\u5728200\u5b57\u4ee5\u5185\u3002";',
+'	const payload = {',
+'		model: cfg.model,',
+'		messages: [{ role: "user", content: [',
+'			{ type: "text", text: prompt },',
+'			{ type: "image_url", image_url: { url: dataUri } }',
+'		] }],',
+'		stream: false,',
+'		keep_alive: cfg.keepAlive ?? "60s",',
+'		temperature: 0.2,',
+'		max_tokens: 512',
+'	};',
+'	try {',
+'		const resp = await fetch(`${base}/v1/chat/completions`, {',
+'			method: "POST",',
+'			headers: { "Content-Type": "application/json" },',
+'			body: JSON.stringify(payload),',
+'			signal: AbortSignal.timeout(cfg.timeoutMs ?? 300000)',
+'		});',
+'		if (!resp.ok) return null;',
+'		const body = await resp.json();',
+'		const text = body?.choices?.[0]?.message?.content;',
+'		return typeof text === "string" && text.trim() !== "" ? text.trim() : null;',
+'	} catch {',
+'		return null;',
+'	}',
+'}',
+'/** Store prompt images, describe each through the VL bridge, and return a',
+' * content array that keeps the image blocks (visible in history) and appends',
+' * one text block with the generated description per image. Null when the',
+' * bridge cannot serve. */',
+'async function visionBridge(ctx, content) {',
+'	const cfg = await visionBridgeConfig();',
+'	if (cfg === null) return null;',
+'	const durable = await durablePromptContent(ctx, content);',
+'	const imageBlocks = durable.filter((block) => block.type === "image");',
+'	if (imageBlocks.length === 0) return durable;',
+'	const out = [];',
+'	for (const block of durable) {',
+'		out.push(block);',
+'		if (block.type === "image") {',
+'			const stored = await ctx.attachments.readImage(block.attachment);',
+'			const dataUri = `data:${stored.ref.mediaType};base64,${Buffer.from(stored.data).toString("base64")}`;',
+'			const desc = await ollamaVisionDescribe(cfg, dataUri);',
+'			if (desc === null) return null;',
+'			out.push({ type: "text", text: `[Image note (local vision model ${cfg.model})] ${desc}` });',
+'		}',
+'	}',
+'	return out;',
+'}',
+''
+];
+
+/** Replacement for the refusal statement (5 lines -> 14 lines, tab indented). */
+export const REFUSAL_REPLACEMENT_LINES = [
+'\t\t\t\t\t\t\tif (modelInfo.inputModalities !== void 0 && !modelInfo.inputModalities.includes("image")) {',
+'\t\t\t\t\t\t\t\tconst bridged = await visionBridge(ctx, content);',
+'\t\t\t\t\t\t\t\tif (bridged !== null) {',
+'\t\t\t\t\t\t\t\t\tconst message = createUserMessage({ content: bridged, source });',
+'\t\t\t\t\t\t\t\t\tif (mode === "steer") agent.steer(message);',
+'\t\t\t\t\t\t\t\t\telse agent.followup(message);',
+'\t\t\t\t\t\t\t\t\treturn ok(request, { accepted: true });',
+'\t\t\t\t\t\t\t\t}',
+'\t\t\t\t\t\t\t\treturn err(request, {',
+'\t\t\t\t\t\t\t\t\tcode: "attachment-error",',
+'\t\t\t\t\t\t\t\t\tmessage: `Model "${current.model}" does not support image input.`,',
+'\t\t\t\t\t\t\t\t\tdetails: { reason: "MODEL_DOES_NOT_SUPPORT_IMAGES" }',
+'\t\t\t\t\t\t\t\t});',
+'\t\t\t\t\t\t\t}'
+];
+
+/** The llm-pi-ai settings section appended to settings.yaml (if absent). */
+export const SETTINGS_SECTION = `
+# --- dsh-ollama-vision-bridge: local Ollama provider (OpenAI-compatible endpoint) ---
+llm-pi-ai:
+  providers:
+    ollama:
+      displayName: Ollama 本地
+      api: openai-completions
+      baseURL: http://127.0.0.1:11434/v1
+      models:
+        - id: "qwen3-vl:8b"
+          name: Qwen3-VL 8B
+          input: [text, image]
+          contextWindow: 32768
+          maxTokens: 4096
+`;
+
+/** Default vision-bridge.yaml written when absent (user edits are preserved). */
+export const BRIDGE_CONFIG_DEFAULT = `# dsh 视觉桥接配置（dsh-ollama-vision-bridge）：聊天模型不支持图片时，用本地 Ollama VL 模型描述图片
+# 删除本文件或把 model 置空即关闭桥接，恢复 DSH 原生拒绝行为
+baseURL: http://127.0.0.1:11434
+model: "qwen3-vl:8b"
+# 冷却机制：推理结束后 VL 模型在显存中驻留 keepAlive 时长（无新请求即自动卸载，腾出显存）
+# 取值同 Ollama keep_alive："30s"/"5m"/秒数(60)/0（立即卸载）。默认 60s。
+keepAlive: "60s"
+`;
