@@ -1,3 +1,8 @@
 node_modules/
 *.dsh-tmp
 .DS_Store
+
+# Repo-local files (machine-specific, not part of the plugin)
+/AGENTS.md
+/check-status.ps1
+/_scratch/
