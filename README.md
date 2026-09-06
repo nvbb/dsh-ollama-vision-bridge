@@ -5,6 +5,14 @@ DeepSeek Harness（DSH）插件（适配 **DSH ≥ 0.1.2-rc.1**）：**当聊天
 保留在对话历史里（请求携带 Ollama `keep_alive`，推理结束后模型在显存中只驻留一小段时间，
 空闲即自动卸载——显存冷却，不占其他模型的显存）。
 
+> **English**: A [DeepSeek Harness](https://deepseek-harness.github.io/deepseek-harness/) (DSH ≥
+> 0.1.2-rc.1) plugin for **text-only chat models + local image understanding**. When you attach an
+> image to a model that does not support images, a local [Ollama](https://ollama.com) vision model
+> (default `qwen3-vl:8b`) describes it and the description is injected into the **same model step** —
+> one send, one answer, no cloud, no API key. Images stay in your message history; the VL model
+> unloads after a short `keep_alive` idle (VRAM cooling). Falls back to DSH's native rejection when
+> Ollama is down. 中文文档如下。
+
 ## 原理
 
 - 安装时（`patch/apply.mjs`）给 `@deepseek-ai/dsh-api-session-controller` 打一个幂等补丁。
@@ -31,21 +39,24 @@ DeepSeek Harness（DSH）插件（适配 **DSH ≥ 0.1.2-rc.1**）：**当聊天
 
 ## 安装（首次 / 换新机器）
 
-> 先停掉正在运行的 `dsh web`（Windows 上 node 会锁住 node_modules，运行中装不了）。
+> 先停掉正在运行的 `dsh web`（Windows 上 node 会锁住 node_modules，运行中装不了）；装完再启动。
 
-方式一：从你的 git 仓库安装（推荐，见下文「放到自己的 git 仓库」）：
+方式一：从 GitHub 安装（任何机器通用；把 `<owner>` 换成仓库所属账号）：
 
 ```powershell
-dsh plugin --profile web add git+https://github.com/<你的账号>/dsh-ollama-vision-bridge.git
+dsh plugin --profile web add git+https://github.com/<owner>/dsh-ollama-vision-bridge.git
 node "$env:USERPROFILE\.dsh\profiles\node_modules\dsh-ollama-vision-bridge\patch\apply.mjs"
 ```
 
-方式二：本地路径安装（不需要 git 远程，机器本地即可）：
+方式二：npm 安装（若已发布到 npm registry）：
 
 ```powershell
-dsh plugin --profile web add file:D:/CLAW-SHARE/DSH/dsh-ollama-vision-bridge
+dsh plugin --profile web add dsh-ollama-vision-bridge
 node "$env:USERPROFILE\.dsh\profiles\node_modules\dsh-ollama-vision-bridge\patch\apply.mjs"
 ```
+
+本地开发 / 调试：`dsh plugin --profile web add file:<仓库的本地路径>`（如
+`file:C:/dev/dsh-ollama-vision-bridge`，不需要 git 远程）。
 
 然后重新启动 `dsh web`。
 
@@ -89,25 +100,16 @@ vision-bridge:
 前提：Ollama 在跑（`ollama list` 能看到模型），模型目录环境变量
 `OLLAMA_MODELS` 指向含 `qwen3-vl:8b` 的目录。
 
-## 放到你自己的 git 仓库
+## 二次发布 / 自托管
 
-```powershell
-cd D:\CLAW-SHARE\DSH\dsh-ollama-vision-bridge
-git init
-git add .
-git commit -m "dsh ollama vision bridge plugin"
-# 在 GitHub / Gitee 建一个空仓库后：
-git remote add origin https://github.com/<你的账号>/dsh-ollama-vision-bridge.git   # 或 gitee
-git push -u origin main
-```
+本仓库本身就是完整的 git 仓库，且**零 npm 依赖**（`apply.mjs` / `lib` 只用 node 内置模块，
+补丁注入的运行时辅助代码所需的 `js-yaml` 由 DSH 宿主环境提供——无需 `npm install`、无
+lockfile）。clone / fork 后推到自己的 GitHub / Gitee 远程即可：
 
-之后任何机器（主机崩了重装、换电脑）都只需要：
-```powershell
-dsh plugin --profile web add git+https://github.com/<你的账号>/dsh-ollama-vision-bridge.git
-node "...\dsh-ollama-vision-bridge\patch\apply.mjs"
-```
-
-私有仓库需要先配好 git 凭据（Windows 凭据管理器 / SSH）。
+- 从 git 安装：把「安装-方式一」里的 `<owner>` 换成你的账号；
+- 发布到 npm：先确认 `package.json` 的 `name` 未被占用，再 `npm publish`；
+  之后可用「安装-方式二」直接按包名安装；
+- 私有远程：先配置 git 凭据（Windows 凭据管理器 / SSH）。
 
 ## 目录结构
 
@@ -116,9 +118,18 @@ dsh-ollama-vision-bridge/
 ├── package.json          # dsh.bundle.patch → 自动挂载为 profile bundle
 ├── cordis.patch.yml      # 插入 vision-bridge 运行时行
 ├── lib/index.js          # 运行时状态检查（绝不抛错）
+├── test/bridge-smoke.mjs # 端到端冒烟测试（真实调本地 Ollama VL 模型）
+├── LICENSE               # MIT
 └── patch/
     ├── source.mjs        # 补丁源码（单一事实源，含 v2 辅助代码与锚点）
     └── apply.mjs         # 安装/重装/检查脚本（支持 --check / --file）
+```
+
+## 开发 / 测试
+
+```powershell
+node patch/apply.mjs --check   # 只读检查：宿主补丁与配置状态（需 DSH profile 在位）
+node test/bridge-smoke.mjs     # 端到端冒烟：需本地 Ollama(127.0.0.1:11434) 且 VL 模型在位
 ```
 
 ## 已知限制
