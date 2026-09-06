@@ -41,19 +41,13 @@ DeepSeek Harness（DSH）插件（适配 **DSH ≥ 0.1.2-rc.1**）：**当聊天
 
 > 先停掉正在运行的 `dsh web`（Windows 上 node 会锁住 node_modules，运行中装不了）；装完再启动。
 
-方式一：从 GitHub 安装（任何机器通用；把 `<owner>` 换成仓库所属账号）：
+方式一：从 GitHub 安装 ：
 
 ```powershell
-dsh plugin --profile web add git+https://github.com/<owner>/dsh-ollama-vision-bridge.git
+dsh plugin --profile web add git+https://github.com/nvbb/dsh-ollama-vision-bridge.git
 node "$env:USERPROFILE\.dsh\profiles\node_modules\dsh-ollama-vision-bridge\patch\apply.mjs"
 ```
 
-方式二：npm 安装（若已发布到 npm registry）：
-
-```powershell
-dsh plugin --profile web add dsh-ollama-vision-bridge
-node "$env:USERPROFILE\.dsh\profiles\node_modules\dsh-ollama-vision-bridge\patch\apply.mjs"
-```
 
 本地开发 / 调试：`dsh plugin --profile web add file:<仓库的本地路径>`（如
 `file:C:/dev/dsh-ollama-vision-bridge`，不需要 git 远程）。
