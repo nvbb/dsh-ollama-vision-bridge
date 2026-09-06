@@ -100,7 +100,7 @@ vision-bridge:
 补丁注入的运行时辅助代码所需的 `js-yaml` 由 DSH 宿主环境提供——无需 `npm install`、无
 lockfile）。clone / fork 后推到自己的 GitHub / Gitee 远程即可：
 
-- 从 git 安装：把「安装-方式一」里的 `<owner>` 换成你的账号；
+- 从 git 安装：本仓库直接照「安装-方式一」执行即可；fork 后把命令里的仓库地址换成你自己的 fork；
 - 发布到 npm：先确认 `package.json` 的 `name` 未被占用，再 `npm publish`；
   之后可用「安装-方式二」直接按包名安装；
 - 私有远程：先配置 git 凭据（Windows 凭据管理器 / SSH）。

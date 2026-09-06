@@ -12,6 +12,15 @@
     "README.md"
   ],
   "license": "MIT",
+  "author": "nvbb",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nvbb/dsh-ollama-vision-bridge.git"
+  },
+  "homepage": "https://github.com/nvbb/dsh-ollama-vision-bridge",
+  "bugs": {
+    "url": "https://github.com/nvbb/dsh-ollama-vision-bridge/issues"
+  },
   "keywords": [
     "dsh",
     "deepseek-harness",
