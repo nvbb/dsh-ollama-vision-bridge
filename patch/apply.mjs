@@ -151,9 +151,9 @@ function stripHelpers(lines) {
 			break;
 		}
 	}
-	if (start < 0 || end < 0 || end <= start) return false;
+	if (start < 0 || end < 0 || end <= start) return -1;
 	lines.splice(start, end - start + 1);
-	return true;
+	return start;
 }
 
 function writeFileAtomic(file, text) {
@@ -204,6 +204,53 @@ function patchController(file) {
 	const out = appendHelpers(lines.join("\n"));
 	writeFileAtomic(file, out);
 	log(`patched ${file} (${spliced.style} refusal form + helpers ${MARKER})`);
+	return { ok: true };
+}
+
+/** Restore a patched copy: remove helpers and rewrite the bridge branch back. */
+function unpatchController(file) {
+	if (!existsSync(file)) {
+		log(`target not found: ${file}`);
+		return { ok: false, reason: "target-not-found" };
+	}
+	const text = readFileSync(file, "utf8");
+	const lines = text.split(/\r?\n/);
+	const region = lines.findIndex((line) => line.includes(REGION_CALL));
+	let changed = false;
+	if (region > 0) {
+		const openLine = lines[region - 1];
+		const ws = /^(\s*)/u.exec(openLine)?.[1] ?? "";
+		const iws = ws + indentUnit(ws);
+		const throwLine = lines[region + 1] ?? "";
+		const throwStmt = throwLine.startsWith(iws)
+			? throwLine.slice(iws.length).replace(/^if \(bridged === null\) /u, "").trim()
+			: "";
+		const returnOk = (lines[region + 2] ?? "").trim() === "return { accepted: true };";
+		const closeOk = (lines[region + 3] ?? "").trim() === "}";
+		if (!throwStmt.startsWith("throw new RemoteError(") || !returnOk || !closeOk) {
+			return { ok: false, reason: "region-shape-unexpected" };
+		}
+		if (openLine.includes("!== void 0")) {
+			const cond = 'model.inputModalities !== void 0 && !model.inputModalities.includes("image")';
+			lines.splice(region - 1, 5, `${ws}if (${cond}) ${throwStmt}`);
+		} else {
+			lines.splice(region, 3, `${iws}${throwStmt}`);
+		}
+		changed = true;
+	}
+	const helperStart = stripHelpers(lines);
+	if (helperStart >= 0) {
+		changed = true;
+		// appendHelpers() inserted one blank separator line before the helper
+		// block; drop it again so a round trip restores the original bytes.
+		if (helperStart > 0 && lines[helperStart - 1] === "") lines.splice(helperStart - 1, 1);
+	}
+	if (!changed) {
+		log(`not patched: ${file}`);
+		return { ok: true, already: true };
+	}
+	writeFileAtomic(file, lines.join("\n"));
+	log(`restored ${file}`);
 	return { ok: true };
 }
 
@@ -293,6 +340,7 @@ function targetFile(home, rel) {
 function main() {
 	const args = process.argv.slice(2);
 	const checkOnly = args.includes("--check");
+	const unpatchMode = args.includes("--unpatch");
 	const fileIdx = args.indexOf("--file");
 	const dirIdx = args.indexOf("--controller-dir");
 	const home = dshHome();
@@ -313,6 +361,22 @@ function main() {
 			for (const rel of PATCH_FILES) targets.push(join(dir, ...rel));
 		}
 		log(`controller targets:\n${targets.map((t) => `  - ${t}`).join("\n")}`);
+	}
+
+	if (unpatchMode) {
+		let ok = false;
+		for (const target of targets) {
+			const result = unpatchController(target);
+			if (!result.ok) continue;
+			ok = true;
+			if (!result.already && !syntaxCheck(target)) {
+				log(`!! restored file failed node --check — review: ${target}`);
+				ok = false;
+			}
+		}
+		log(ok ? "controllers restored. restart dsh to load the stock behavior." : "unpatch incomplete — see messages above.");
+		process.exit(ok ? 0 : 1);
+		return;
 	}
 
 	if (checkOnly) {

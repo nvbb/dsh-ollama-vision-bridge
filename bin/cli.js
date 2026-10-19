@@ -12,6 +12,8 @@
  *   model <name>     Point the bridge at another local Ollama VL model.
  *   status           Show the configured model / endpoint / keep_alive.
  *   check --model    Verify the model exists in the local Ollama instance.
+ *   uninstall        Remove the plugin, delete the profile config row and
+ *                    restore the patched controller files.
  *
  * @module dsh-ollama-vision-bridge/cli
  */
@@ -36,6 +38,7 @@ Usage:
   npx github:nvbb/dsh-ollama-vision-bridge model <name> [options]
   npx github:nvbb/dsh-ollama-vision-bridge status [options]
   npx github:nvbb/dsh-ollama-vision-bridge check --model <name> [options]
+  npx github:nvbb/dsh-ollama-vision-bridge uninstall [options]
 
 Commands:
   setup     Validate the VL model, install the plugin into a profile, patch
@@ -43,6 +46,8 @@ Commands:
   model     Switch the bridge to another local Ollama VL model (alias: set-model).
   status    Show the configured model / base URL / keep_alive (read-only).
   check     Query the local Ollama /api/tags and report whether the model exists.
+  uninstall Remove the plugin from the profile, delete the vision-bridge config
+            row, and restore the patched controller files.
   help      Show this help.
 
 Options:
@@ -56,14 +61,19 @@ Options:
   --apply                 (model) also run patch/apply.mjs.
   --no-check              Skip the Ollama model check.
   --probe                 (check) also run one real 1x1 PNG description.
+  --skip-plugin           (uninstall) do not run dsh plugin remove.
+  --keep-config           (uninstall) keep the vision-bridge profile config row.
+  --skip-restore          (uninstall) do not restore the patched controller.
   --profile-file <path>   Override cordis.patch.yml (tests/advanced).
-  --dsh <path>            dsh executable. Default: dsh.
+  --dsh <cmd>             dsh executable or command string, e.g.
+                          "npx.cmd --yes @deepseek-ai/dsh@0.2.1-rc.2". Default: dsh.
   -h, --help              Show this help.
 
 Examples:
   npx github:nvbb/dsh-ollama-vision-bridge setup --model qwen3-vl:8b
   npx github:nvbb/dsh-ollama-vision-bridge model qwen3.8:27b-iq3s --keep-alive 10m
   npx github:nvbb/dsh-ollama-vision-bridge status --check
+  npx github:nvbb/dsh-ollama-vision-bridge uninstall --dsh "npx.cmd --yes @deepseek-ai/dsh@0.2.1-rc.2"
 `;
 
 class CliError extends Error {}
@@ -87,6 +97,9 @@ function parseArgs(argv) {
     else if (arg === "--dsh") options.dsh = value();
     else if (arg === "--skip-install") options.skipInstall = true;
     else if (arg === "--skip-apply") options.skipApply = true;
+    else if (arg === "--skip-plugin") options.skipPlugin = true;
+    else if (arg === "--keep-config") options.keepConfig = true;
+    else if (arg === "--skip-restore") options.skipRestore = true;
     else if (arg === "--apply") options.apply = true;
     else if (arg === "--no-check") options.noCheck = true;
     else if (arg === "--probe") options.probe = true;
@@ -241,15 +254,32 @@ function defaultPluginSpec() {
   return GITHUB_SPEC;
 }
 
+/**
+ * Quote the dsh executable while keeping a full command line verbatim.
+ * `--dsh "npx.cmd --yes @deepseek-ai/dsh@0.2.1-rc.2"` must run as a command
+ * line, not as a single quoted program name.
+ */
+function dshCommandPrefix(dsh) {
+	const value = String(dsh).trim();
+	if (value.startsWith('"') && value.endsWith('"')) return value;
+	if (/\s/u.test(value) && /(^|\s)-{1,2}\S/u.test(value)) return value; // command line with flags
+	return /\s/u.test(value) ? '"' + value.replace(/"/gu, '""') + '"' : value;
+}
+
+/** Quote one argument for cmd only when it actually needs it. */
+function quoteArg(value) {
+	const text = String(value);
+	return /[\s"&|<>^]/u.test(text) ? '"' + text.replace(/"/gu, '""') + '"' : text;
+}
+
 function runInstall(options) {
   const spec = options.plugin ?? defaultPluginSpec();
   const dsh = options.dsh ?? "dsh";
   const args = ["plugin", "--profile", profileName(options), "add", spec];
   console.log(`[vision] ${dsh} ${args.join(" ")}`);
-  const quote = (value) => '"' + String(value).replace(/"/gu, '""') + '"';
-  const executable = /\s/u.test(dsh) ? quote(dsh) : dsh;
+  const executable = dshCommandPrefix(dsh);
   const result = process.platform === "win32"
-    ? spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", [executable, ...args.map(quote)].join(" ")], {
+    ? spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", [executable, ...args.map(quoteArg)].join(" ")], {
       stdio: "inherit",
       cwd: process.cwd(),
     })
@@ -275,6 +305,78 @@ function runApply(options) {
   if (result.status !== 0) {
     throw new CliError("patch/apply.mjs failed — see messages above");
   }
+}
+
+/** Run one dsh command; --dsh may be a full command string (npx launch). */
+function runDshCommand(options, args) {
+	const dsh = options.dsh ?? "dsh";
+	console.log(`[vision] ${dsh} ${args.join(" ")}`);
+	const executable = dshCommandPrefix(dsh);
+	const result = process.platform === "win32"
+		? spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", [executable, ...args.map(quoteArg)].join(" ")], { stdio: "inherit", cwd: process.cwd() })
+		: spawnSync(dsh, args, { stdio: "inherit", cwd: process.cwd() });
+	if (result.error !== undefined && result.error !== null) {
+		throw new CliError(`Could not run ${dsh}: ${result.error.message}. Stop 'dsh web' first.`);
+	}
+	if (result.status !== 0) {
+		throw new CliError(`command failed with exit ${String(result.status)}: ${dsh} ${args.join(" ")}`);
+	}
+}
+
+/** True when the profile lists the plugin in dependencies or bundles. */
+function pluginInstalled(options) {
+	const file = path.join(path.dirname(profileFile(options)), "package.json");
+	try {
+		const profilePkg = JSON.parse(fs.readFileSync(file, "utf8"));
+		const deps = profilePkg?.dependencies ?? {};
+		const bundles = profilePkg?.dsh?.profile?.bundles ?? [];
+		return deps["dsh-ollama-vision-bridge"] !== undefined || bundles.includes("dsh-ollama-vision-bridge");
+	} catch {
+		return false;
+	}
+}
+
+/** Remove the `- id: vision-bridge` config block from the profile patch. */
+function removeProfileRow(options) {
+	const file = profileFile(options);
+	if (!fs.existsSync(file)) {
+		console.log(`[vision] profile patch not found: ${file} — nothing to remove`);
+		return;
+	}
+	const lines = readLines(file);
+	const block = findBlock(lines, ENTRY_ID);
+	if (block === undefined) {
+		console.log("[vision] no vision-bridge row in the profile patch");
+		return;
+	}
+	const backup = backupPatch(file);
+	lines.splice(block.start, block.end - block.start);
+	if (block.start > 0 && block.start < lines.length && lines[block.start].trim() === "" && lines[block.start - 1].trim() === "") lines.splice(block.start, 1);
+	writeLines(file, lines);
+	console.log(`[vision] removed the vision-bridge config row from ${file}`);
+	console.log(`[vision] backup: ${backup}`);
+}
+
+/** Restore the patched controller files (patch/apply.mjs --unpatch). */
+function runUnpatch(options) {
+	const script = path.join(packageRoot, "patch", "apply.mjs");
+	console.log(`[vision] node ${script} --unpatch`);
+	const result = spawnSync(process.execPath, [script, "--unpatch"], { stdio: "inherit", cwd: process.cwd() });
+	if (result.error !== undefined && result.error !== null) {
+		throw new CliError(`Could not run ${script}: ${result.error.message}`);
+	}
+	if (result.status !== 0) throw new CliError("patch/apply.mjs --unpatch failed — see messages above");
+}
+
+async function commandUninstall(options) {
+	if (options.skipPlugin !== true) {
+		if (pluginInstalled(options)) runDshCommand(options, ["plugin", "--profile", profileName(options), "remove", "dsh-ollama-vision-bridge"]);
+		else console.log("[vision] plugin not present in the profile — skipping dsh plugin remove");
+	}
+	if (options.keepConfig !== true) removeProfileRow(options);
+	if (options.skipRestore !== true) runUnpatch(options);
+	console.log("[vision] uninstalled. restart dsh web (stop the old process first).");
+	console.log("[vision] note: $DSH_HOME/vision-bridge.yaml (legacy) may remain; it is ignored once the plugin and patch are removed.");
 }
 
 function normalizeBaseURL(raw) {
@@ -428,6 +530,7 @@ async function main() {
   if (command === "model" || command === "set-model") return commandModel(options);
   if (command === "status") return commandStatus(options);
   if (command === "check") return commandCheck(options);
+  if (command === "uninstall") return commandUninstall(options);
   throw new CliError(`Unknown command "${command}". Run with --help.`);
 }
 

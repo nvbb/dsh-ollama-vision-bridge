@@ -78,6 +78,13 @@ npx github:nvbb/dsh-ollama-vision-bridge setup --model qwen3-vl:8b
 
 （发布到 npm 后也可 `npx dsh-ollama-vision-bridge setup --model qwen3-vl:8b`。）
 
+> 如果你的 DSH 是通过 npx 启动的（如 `npx.cmd --yes @deepseek-ai/dsh@0.2.1-rc.2 web`），
+> 请把同一个入口传给 CLI，否则 `setup` 找不到 `dsh` 命令：
+> ```powershell
+> npx.cmd --yes github:nvbb/dsh-ollama-vision-bridge setup --model qwen3-vl:8b `
+>   --dsh "npx.cmd --yes @deepseek-ai/dsh@0.2.1-rc.2"
+> ```
+
 方式二：npm 包安装（插件已发布到 npm 时）：
 
 ```powershell
@@ -180,6 +187,47 @@ CLI 会自动维护这一段）：
 
 前提：已按上文「准备」装好 Ollama 并下载了 VL 模型（`ollama list` 能看到），模型库环境变量
 `OLLAMA_MODELS` 指向它的目录。
+
+## 卸载
+
+> 先停掉 `dsh web`（Windows 上 node 会锁住 profile 的 node_modules，运行中删不掉）。
+
+方式一：一条命令（用 npx 启动 DSH 时也适用）：
+
+```powershell
+# --dsh 传你平时启动 DSH 的同一个入口；npx 启动方式示例：
+npx.cmd --yes github:nvbb/dsh-ollama-vision-bridge uninstall `
+  --dsh "npx.cmd --yes @deepseek-ai/dsh@0.2.1-rc.2"
+```
+
+它依次做四件事：
+1. `dsh plugin --profile web remove dsh-ollama-vision-bridge`（从 profile 移除插件）；
+2. 从 profile 的 `cordis.patch.yml` 删除 `- id: vision-bridge` 配置块（自动备份）；
+3. 运行 `patch/apply.mjs --unpatch`，把所有 controller 副本**还原为 DSH 原始代码**；
+4. 提示重启 `dsh web`。
+
+方式二：手动（等价步骤）：
+
+```powershell
+# 1) 移除插件（入口用你平时启动 DSH 的那一个）
+npx.cmd --yes @deepseek-ai/dsh@0.2.1-rc.2 plugin --profile web remove dsh-ollama-vision-bridge
+
+# 2) 还原 controller 补丁（用仓库里的脚本；profile 内那份会随插件一起删除）
+node <你的仓库路径>\patch\apply.mjs --unpatch
+
+# 3) 删除 profile 配置中的 - id: vision-bridge 块
+#    或用 CLI 自动处理（跳过已手动完成的步骤）：
+node <你的仓库路径>\bin\cli.js uninstall --skip-plugin --skip-restore
+```
+
+然后重新启动 `dsh web`。
+
+`uninstall` 的可选开关：`--skip-plugin`（只删配置并还原补丁）、`--keep-config`（保留配置行）、
+`--skip-restore`（只移除插件/配置，不动 controller），便于分步处理。
+
+可选清理（不删也不影响，插件与补丁移除后不再读取）：
+- `$DSH_HOME\vision-bridge.yaml`（旧版 legacy 配置）；
+- `$DSH_HOME\profiles\web\cordis.patch.yml.bak-*-visioncli`（CLI 修改配置时留下的备份）。
 
 ## 二次发布 / 自托管
 
