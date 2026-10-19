@@ -128,6 +128,22 @@ npx github:nvbb/dsh-ollama-vision-bridge check --model qwen3.8:27b-iq3s --probe 
 `dsh web` 生效。也可以用 GUI 的 settings 表单改 profile 配置（若该 profile 渲染了设置页），
 或直接编辑对应的 `- id: vision-bridge` 行。
 
+## 在聊天里查询 / 切换（/vision-bridge）
+
+安装并重启后，直接在对话框输入，无需改文件、无需重启：
+
+| 用法 | 作用 |
+|---|---|
+| `/vision-bridge status` | 显示当前 VL 模型、Ollama 地址、keep_alive、宿主补丁状态 |
+| `/vision-bridge model qwen3-vl:8b` | 把桥接切换到另一个本地 VL 模型（先查 `GET /api/tags` 校验该模型在位） |
+| `/vision-bridge base-url http://127.0.0.1:11434` | 改 Ollama 地址 |
+| `/vision-bridge keep-alive 10m` | 改显存冷却时间（`60s` / `10m` / `0`=立即卸载） |
+| `/vision-bridge reset` | 恢复默认配置（删除 model/baseURL/keepAlive 覆盖项） |
+
+命令走 DSH 的 `ctx.configEditor` 写 profile 配置（保留 YAML 注释），同时立即更新进程内桥接配置，
+**下一次发图即用新模型**。CLI 的 `model` 命令与它等价：CLI 适合脚本/首次安装，
+`/vision-bridge` 适合日常在聊天框里切换。
+
 ## DSH 更新后
 
 `dsh plugin` / pnpm 重装会覆盖被打补丁的包，重跑一次即可：
