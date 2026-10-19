@@ -45,8 +45,38 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = resolve(__dirname, "..");
 
+/** Files inside one controller package dir that carry the prompt admission. */
+const PATCH_FILES = [["lib", "index.js"], ["lib", "types", "commands.js"]];
+
 function dshHome() {
 	return process.env.DSH_HOME ?? join(homedir(), ".dsh");
+}
+
+/** Locate @deepseek-ai/dsh-api-session-controller copies inside every npx cache. */
+function npxControllerDirs() {
+	const base = process.env.LOCALAPPDATA
+		? join(process.env.LOCALAPPDATA, "npm-cache", "_npx")
+		: join(homedir(), "AppData", "Local", "npm-cache", "_npx");
+	const out = [];
+	let entries;
+	try {
+		entries = readdirSync(base, { withFileTypes: true });
+	} catch {
+		return out;
+	}
+	for (const e of entries) {
+		if (!e.isDirectory()) continue;
+		const candidate = join(base, e.name, "node_modules", "@deepseek-ai", "dsh-api-session-controller");
+		if (existsSync(candidate) && !out.includes(candidate)) out.push(candidate);
+	}
+	return out;
+}
+
+/** All controller package directories the bridge should patch. */
+function controllerDirs(home) {
+	const dirs = [join(home, "profiles", "node_modules", "@deepseek-ai", "dsh-api-session-controller")];
+	for (const d of npxControllerDirs()) dirs.push(d);
+	return dirs;
 }
 
 function log(line) {
@@ -264,6 +294,7 @@ function main() {
 	const args = process.argv.slice(2);
 	const checkOnly = args.includes("--check");
 	const fileIdx = args.indexOf("--file");
+	const dirIdx = args.indexOf("--controller-dir");
 	const home = dshHome();
 	log(`DSH_HOME = ${home}`);
 	log(`package dir = ${PACKAGE_DIR}`);
@@ -272,8 +303,15 @@ function main() {
 	if (fileIdx >= 0 && args[fileIdx + 1]) {
 		targets.push(resolve(args[fileIdx + 1]));
 		log(`single-file test mode: ${targets[0]}`);
+	} else if (dirIdx >= 0 && args[dirIdx + 1]) {
+		const dir = resolve(args[dirIdx + 1]);
+		for (const rel of PATCH_FILES) targets.push(join(dir, ...rel));
+		log(`controller-dir mode: ${dir}`);
 	} else {
-		for (const rel of TARGET_REL) targets.push(targetFile(home, rel));
+		for (const dir of controllerDirs(home)) {
+			if (!existsSync(dir)) continue;
+			for (const rel of PATCH_FILES) targets.push(join(dir, ...rel));
+		}
 		log(`controller targets:\n${targets.map((t) => `  - ${t}`).join("\n")}`);
 	}
 
@@ -288,10 +326,14 @@ function main() {
 		return;
 	}
 
-	let ok = true;
+	// Patch every discovered copy. A single copy that is missing or whose
+	// anchors moved is non-fatal; at least one successful patch decides.
+	let ok = false;
 	for (const target of targets) {
 		const result = patchController(target);
-		if (result.ok && !result.already) {
+		if (!result.ok) continue;
+		ok = true;
+		if (!result.already) {
 			if (!syntaxCheck(target)) {
 				log(`!! patched file failed node --check — restore/review target: ${target}`);
 				ok = false;
@@ -299,7 +341,6 @@ function main() {
 				log(`patched file passed node --check (${target})`);
 			}
 		}
-		if (!result.ok) ok = false;
 	}
 
 	if (ok && fileIdx < 0) {
@@ -309,7 +350,7 @@ function main() {
 	}
 
 	log(ok ? "done. restart dsh (stop the old process first: the one listening on its port) to load the patch."
-		: "setup incomplete — see messages above.");
+		: "setup incomplete — no controller copy could be patched (see messages above).");
 	process.exit(ok ? 0 : 1);
 }
 
