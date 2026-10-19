@@ -36,7 +36,7 @@
  */
 
 /** Marker placed at the start of the appended helper block; re-apply refreshes it. */
-export const MARKER = "DSH OLLAMA VISION BRIDGE PATCH v3";
+export const MARKER = "DSH OLLAMA VISION BRIDGE PATCH v4";
 
 /** Package-relative patch targets under $DSH_HOME/profiles/node_modules/@deepseek-ai/. */
 export const TARGET_REL = [
@@ -66,7 +66,7 @@ export const ANCHOR_MULTI = /^(\s*)if \(model\.inputModalities !== undefined && 
  *   3. legacy `vision-bridge` section of settings.yaml / vision-bridge.yaml
  */
 export const HELPERS_LINES = [
-	"/** DSH OLLAMA VISION BRIDGE PATCH v3 (dsh-ollama-vision-bridge).",
+	"/** DSH OLLAMA VISION BRIDGE PATCH v4 (dsh-ollama-vision-bridge).",
 	" * When the selected chat model is text-only and the user attaches images,",
 	" * dshOllamaAdmit() durably admits the images (history keeps them), asks the",
 	" * local Ollama VL model for a short description of each, enqueues the user's",
@@ -229,7 +229,7 @@ export const HELPERS_LINES = [
 	"\t\t\tif (decision !== null && decision !== void 0 && decision.kind === \"enter\") {",
 	"\t\t\t\treturn {",
 	"\t\t\t\t\t...decision,",
-	"\t\t\t\t\tmessages: [createUserMessage({ content: [{ type: \"text\", text: pending }], source: { kind: \"plugin\", plugin: \"dsh-ollama-vision-bridge\" } }), ...decision.messages]",
+	"\t\t\t\t\tmessages: [createUserMessage({ content: [{ type: \"text\", text: pending }], source: { kind: \"plugin:dsh-ollama-vision-bridge\" } }), ...decision.messages]",
 	"\t\t\t\t};",
 	"\t\t\t}",
 	"\t\t\treturn decision;",

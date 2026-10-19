@@ -127,13 +127,13 @@ if (decision.kind !== "enter") {
 }
 const first = decision.messages[0];
 const text = Array.isArray(first.content) ? first.content.map((b) => b.text ?? "").join("") : "";
-if (!(first.source?.kind === "plugin" && first.source?.plugin === "dsh-ollama-vision-bridge")) {
-	console.error("FAIL: note message source is not plugin/dsh-ollama-vision-bridge");
+if (first.source?.kind !== "plugin:dsh-ollama-vision-bridge") {
+	console.error("FAIL: note message source kind is not plugin:dsh-ollama-vision-bridge");
 	process.exit(1);
 }
 if (!text.includes("图片说明") || text.length < 20) {
 	console.error("FAIL: note text missing/empty (description too short or blank)");
 	process.exit(1);
 }
-console.log("note message OK: source=plugin, first 60 chars =", JSON.stringify(text.slice(0, 60)));
+console.log("note message OK: source=plugin:dsh-ollama-vision-bridge, first 60 chars =", JSON.stringify(text.slice(0, 60)));
 console.log("SMOKE TEST PASSED");

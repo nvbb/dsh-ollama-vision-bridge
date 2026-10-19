@@ -24,7 +24,7 @@ DeepSeek Harness（DSH）插件（适配 **DSH ≥ 0.2.0-rc.1**，0.2.1-rc.2 实
   - 图片先按 DSH 原生流程**落库成 durable 引用并保留在你的消息里**，你的消息一字不改，
     且只排队这一条消息（一次发送 = 一次回答，不会多出额外回复）；
   - 描述通过 **`agent/pre-step` 瀑布钩子**在模型请求生成时并入**同一步骤**；
-  - 描述作为独立的**「上下文注入」消息**（`source: { kind: "plugin", plugin: "dsh-ollama-vision-bridge" }`）
+  - 描述作为独立的**「上下文注入」消息**（`source: { kind: "plugin:dsh-ollama-vision-bridge" }`，DSH 0.2.x 会话格式 v4 要求 producer-owned source kind，旧的 `kind: "plugin"` 会被拒绝）
     进入对话，界面显示为一条可折叠的"上下文注入"条目；
   - 描述文本自带**系统说明**，引导模型在回答开头告知「当前模型不支持原生图片识别，
     已调用本地视觉模型识别」，然后基于描述正式回答；
