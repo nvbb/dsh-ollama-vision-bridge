@@ -38,6 +38,34 @@ DeepSeek Harness（DSH）插件（适配 **DSH ≥ 0.2.0-rc.1**，0.2.1-rc.2 实
 - 包声明了 `dsh.bundle.patch`，`dsh plugin add` 后会自动挂进 profile 的 bundles 层
   （补丁行 `vision-bridge`），无需手改 cordis.patch.yml。
 
+## 准备：安装 Ollama 并下载视觉模型
+
+本插件依赖本机 [Ollama](https://ollama.com) 提供视觉能力（不需要云端 API key）。详见 Ollama 官方文档：<https://ollama.com>，模型库：<https://ollama.com/library>。
+
+1. **安装 Ollama**（Windows / macOS / Linux 安装包见 <https://ollama.com/download>）：
+
+   ```powershell
+   # Windows：下载 https://ollama.com/download/windows 安装包，双击安装，装完托盘常驻
+   # macOS / Linux 也可用官方脚本：
+   # curl -fsSL https://ollama.com/install.sh | sh
+   ```
+
+2. **确认服务在跑**（默认端口 11434）：
+
+   ```powershell
+   curl.exe http://127.0.0.1:11434/api/tags   # 返回 JSON 即正常；连不上就启动托盘里的 Ollama
+   ```
+
+3. **下载一个视觉（VL）模型**（默认用 `qwen3-vl:8b`，约 6GB；也可换任意 Ollama VL 模型，模型名即 `--model` 参数）：
+
+   ```powershell
+   ollama pull qwen3-vl:8b
+   # 可选的同类视觉模型：qwen3-vl:30b、gemma3:12b、minicpm-v 等（越大越强，显存要求更高）
+   # 更多模型见 https://ollama.com/library
+   ```
+
+4. **模型库放别的磁盘（可选）**：Windows 上在 Ollama 托盘 → Settings 里修改模型目录（或设 `OLLAMA_MODELS` 环境变量后重启 Ollama），再用 `ollama list` 确认能看到刚下载的模型。
+
 ## 安装（首次 / 换新机器）
 
 > 先停掉正在运行的 `dsh web`（Windows 上 node 会锁住 node_modules，运行中装不了）；装完再启动。
@@ -134,8 +162,8 @@ CLI 会自动维护这一段）：
 `DSH_VISION_BRIDGE_MODEL` / `DSH_VISION_BRIDGE_KEEP_ALIVE`。删除配置行（或 `enabled: false`）
 即关闭桥接，恢复 DSH 原生拒绝行为。
 
-前提：Ollama 在跑（`GET http://127.0.0.1:11434/api/tags` 能看到模型），模型库环境变量
-`OLLAMA_MODELS` 指向含 VL 模型的目录。
+前提：已按上文「准备」装好 Ollama 并下载了 VL 模型（`ollama list` 能看到），模型库环境变量
+`OLLAMA_MODELS` 指向它的目录。
 
 ## 二次发布 / 自托管
 
