@@ -203,7 +203,7 @@ dsh-ollama-vision-bridge/
 ├── test/bridge-smoke.mjs # 端到端冒烟测试（真实调本地 Ollama VL 模型）
 ├── LICENSE               # MIT
 └── patch/
-    ├── source.mjs        # 补丁源码（单一事实源，含 v3 辅助代码与锚点）
+    ├── source.mjs        # 补丁源码（单一事实源，含 v4 辅助代码与锚点）
     └── apply.mjs         # 安装/重装/检查脚本（支持 --check / --file）
 ```
 
@@ -215,6 +215,31 @@ node bin/cli.js status --check # 查看 profile 配置并校验模型在位
 node bin/cli.js model <name>   # 切换 VL 模型（写 profile 的 vision-bridge 行）
 node test/bridge-smoke.mjs     # 端到端冒烟：需本地 Ollama(127.0.0.1:11434) 且 VL 模型在位
 ```
+
+## 排障：普通浏览器卡死 / 白屏（与插件无关）
+
+症状：更新插件并重启 `dsh web` 后，**普通浏览器标签页打开后卡死/白屏**，而**无痕窗口正常**。
+
+这是 **DSH Web 的登录态 / 浏览器本地状态**问题，不是本插件造成的，依据：
+
+- 本插件**没有前端代码**（无 client bundle、无 service worker），不写浏览器缓存；
+- 插件的所有改动都在服务端：controller 补丁、profile 配置、`/vision-bridge` 聊天命令；
+- 前端静态资源随 DSH 包发布（本机为 `dsh-web-frontend`，哈希资源未变），服务端对
+  `index.html` 与接口使用 `cache-control: no-store`，客户端不缓存页面；
+- DSH Web 用「启动 token → Cookie」登录：`dsh web` 启动时会打印形如
+  `http://127.0.0.1:3080/?token=…` 的 URL，用它打开会换发有效期约 30 天的签名 Cookie
+  （`dsh-client-connection` 的 `authorizeIndex`）；**没有有效 Cookie 时访问根地址会 401**，
+  客户端可能因此表现为卡死/白屏。无痕窗口是全新 Cookie + token URL，所以正常。
+
+处理顺序：
+
+1. 用**本次** `dsh web` 启动时打印的完整 token URL 打开一次（注意 host 一致：
+   `127.0.0.1` 与 `localhost` 的 Cookie 不通用）；
+2. 仍卡：F12 → Application → **Clear site data**（Cookie / Storage / Cache），再用 token URL 打开；
+3. 无痕可用而常规不行 → 常规浏览器是 Cookie/扩展问题：禁用扩展再试，或换一个干净的浏览器配置；
+4. 若每次重启都复现、清 Cookie 也无效，请把 F12 Console/Network 的报错反馈给 DSH 上游。
+
+> 插件更新本身只写服务端文件，不会破坏浏览器缓存；上述现象在任何 DSH 重启后都可能出现。
 
 ## 已知限制
 
