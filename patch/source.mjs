@@ -1,5 +1,5 @@
 /**
- * dsh-ollama-vision-bridge — patch source of truth (DSH >= 0.1.2-rc.1).
+ * dsh-ollama-vision-bridge — patch source of truth (DSH >= 0.2.0-rc.1).
  *
  * DSH 0.1.2-rc.1 removed @deepseek-ai/dsh-host-apiproxy and moved the chat
  * prompt admission into @deepseek-ai/dsh-api-session-controller:
@@ -7,7 +7,8 @@
  *   - lib/index.js          (runtime bundle; the Web GUI chat path)
  *   - lib/types/commands.js (same business class, separate compile output)
  *
- * In both copies the image-modality refusal lives in the `prompt` RPC handler:
+ * In both copies the image-modality refusal lives in the `prompt` RPC handler
+ * (inside the `admit` closure):
  *
  *   if (hasImage) {
  *     const current = this.agents.selectionFor(agent).current;
@@ -29,13 +30,13 @@
  * a local Ollama VL model (keep_alive VRAM cooling), enqueue the user's own
  * message unchanged (one send -> one response) and stage the description for
  * an agent/pre-step waterfall so the SAME model step that answers also
- * receives the description. DSH 0.1.2 projects image blocks in text-only model
+ * receives the description. DSH projects image blocks in text-only model
  * requests into "[image omitted …]" placeholders on its own, so the durable
  * user message with image references never reaches the text adapter.
  */
 
-/** Marker placed inside the appended helper block; re-apply skips when present. */
-export const MARKER = "DSH OLLAMA VISION BRIDGE PATCH v2";
+/** Marker placed at the start of the appended helper block; re-apply refreshes it. */
+export const MARKER = "DSH OLLAMA VISION BRIDGE PATCH v3";
 
 /** Package-relative patch targets under $DSH_HOME/profiles/node_modules/@deepseek-ai/. */
 export const TARGET_REL = [
@@ -57,16 +58,24 @@ export const ANCHOR_MULTI = /^(\s*)if \(model\.inputModalities !== undefined && 
  * Module-scope helpers appended at the end of the patched file (function
  * declarations are hoisted, so the region splice above can call them). The
  * text is written to be independent of the surrounding file's indent style.
+ *
+ * Config resolution order (0.2.x first, legacy kept for old hosts):
+ *   1. DSH_VISION_BRIDGE_* environment variables
+ *   2. globalThis.__DSH_OLLAMA_VISION_BRIDGE__ — published by the plugin row
+ *      (lib/index.js) from its `vision-bridge` profile entry config
+ *   3. legacy `vision-bridge` section of settings.yaml / vision-bridge.yaml
  */
 export const HELPERS_LINES = [
-	"/** DSH OLLAMA VISION BRIDGE PATCH v2 (dsh-ollama-vision-bridge).",
+	"/** DSH OLLAMA VISION BRIDGE PATCH v3 (dsh-ollama-vision-bridge).",
 	" * When the selected chat model is text-only and the user attaches images,",
 	" * dshOllamaAdmit() durably admits the images (history keeps them), asks the",
 	" * local Ollama VL model for a short description of each, enqueues the user's",
 	" * own message unchanged (one send => one response) and stages the description",
 	" * for the agent/pre-step waterfall so the SAME model step that answers also",
-	" * receives the description. Bridge unavailable => returns null so callers",
-	" * keep the DSH-native refusal. */",
+	" * receives the description. Config comes from the vision-bridge plugin row",
+	" * (globalThis bridge config, DSH >= 0.2.0) or, on older hosts, the legacy",
+	" * vision-bridge section of settings.yaml / vision-bridge.yaml. Bridge",
+	" * unavailable => returns null so callers keep the DSH-native refusal. */",
 	"const dshOllamaPendingNotes = /* @__PURE__ */ new WeakMap();",
 	"const dshOllamaAgentHooks = /* @__PURE__ */ new WeakSet();",
 	"",
@@ -77,6 +86,17 @@ export const HELPERS_LINES = [
 	"\tif (envBase !== void 0 || envModel !== void 0) {",
 	"\t\tif (typeof envModel !== \"string\" || envModel === \"\") return null;",
 	"\t\treturn { baseURL: typeof envBase === \"string\" && envBase !== \"\" ? envBase : \"http://127.0.0.1:11434\", model: envModel, keepAlive: typeof envKeep === \"string\" && envKeep !== \"\" ? envKeep : \"60s\" };",
+	"\t}",
+	"\tconst live = globalThis.__DSH_OLLAMA_VISION_BRIDGE__;",
+	"\tif (live !== null && typeof live === \"object\" && live.enabled !== false && typeof live.model === \"string\" && live.model !== \"\") {",
+	"\t\treturn {",
+	"\t\t\tbaseURL: typeof live.baseURL === \"string\" && live.baseURL !== \"\" ? live.baseURL : \"http://127.0.0.1:11434\",",
+	"\t\t\tmodel: live.model,",
+	"\t\t\tmodels: live.models !== null && typeof live.models === \"object\" ? live.models : void 0,",
+	"\t\t\tkeepAlive: typeof live.keepAlive === \"string\" && live.keepAlive !== \"\" ? live.keepAlive : typeof live.keepAlive === \"number\" ? live.keepAlive : \"60s\",",
+	"\t\t\tprompt: typeof live.prompt === \"string\" && live.prompt !== \"\" ? live.prompt : void 0,",
+	"\t\t\ttimeoutMs: Number.isFinite(live.timeoutMs) ? live.timeoutMs : 300000",
+	"\t\t};",
 	"\t}",
 	"\ttry {",
 	"\t\tconst { readFile } = await import(\"node:fs/promises\");",
@@ -93,7 +113,6 @@ export const HELPERS_LINES = [
 	"\t\t\t// no settings document",
 	"\t\t}",
 	"\t\tif (doc === null) {",
-	"\t\t\t// fallback: legacy standalone vision-bridge.yaml",
 	"\t\t\ttry {",
 	"\t\t\t\tdoc = yaml.load(await readFile(join(home, \"vision-bridge.yaml\"), \"utf8\"));",
 	"\t\t\t} catch {",
@@ -167,7 +186,7 @@ export const HELPERS_LINES = [
 	"\t}",
 	"\tif (cfg === null) return null;",
 	"\tconst model = cfg.models !== void 0 && typeof currentModel === \"string\" && typeof cfg.models[currentModel] === \"string\" && cfg.models[currentModel] !== \"\" ? cfg.models[currentModel] : cfg.model;",
-	"\tconst durable = await admitPromptContent(controller.ctx.attachments, content);",
+	"\tconst durable = await controller.ctx.attachments.admitPromptContent(content);",
 	"\tconst notes = [];",
 	"\tfor (const block of durable) {",
 	"\t\tif (block.type !== \"image\") continue;",
@@ -242,7 +261,8 @@ llm-pi-ai:
 
 /** Default vision-bridge.yaml written when absent (user edits are preserved). */
 export const BRIDGE_CONFIG_DEFAULT = `# dsh 视觉桥接配置（dsh-ollama-vision-bridge）：聊天模型不支持图片时，用本地 Ollama VL 模型描述图片
-# 删除本文件或把 model 置空即关闭桥接，恢复 DSH 原生拒绝行为
+# 新版 DSH（>= 0.2.0）请用 npx dsh-ollama-vision-bridge setup|model 写 profile 配置；
+# 本文件仅供旧版 DSH 回退读取。
 baseURL: http://127.0.0.1:11434
 model: "qwen3-vl:8b"
 # 冷却机制：推理结束后 VL 模型在显存中驻留 keepAlive 时长（无新请求即自动卸载，腾出显存）

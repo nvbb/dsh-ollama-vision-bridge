@@ -1,10 +1,15 @@
 {
   "name": "dsh-ollama-vision-bridge",
-  "version": "0.5.0",
-  "description": "DSH vision bridge (DSH >= 0.1.2-rc.1): when the selected chat model is text-only, attached images are described by a local Ollama VL model (qwen3-vl:8b) with keep_alive VRAM cooling. Install-time patch of dsh-api-session-controller prompt admission + runtime status companion.",
+  "version": "0.6.0",
+  "description": "DSH (>= 0.2.0-rc.1) vision bridge: when the selected chat model is text-only, attached images are described by a local Ollama VL model (default qwen3-vl:8b) with keep_alive VRAM cooling. npx CLI (setup/model/status/check) + install-time patch of dsh-api-session-controller prompt admission + runtime status companion.",
   "type": "module",
   "main": "lib/index.js",
+  "bin": {
+    "dsh-vision": "bin/cli.js",
+    "dsh-ollama-vision-bridge": "bin/cli.js"
+  },
   "files": [
+    "bin",
     "lib",
     "patch",
     "cordis.patch.yml",
@@ -21,13 +26,32 @@
   "bugs": {
     "url": "https://github.com/nvbb/dsh-ollama-vision-bridge/issues"
   },
+  "engines": {
+    "node": ">=20",
+    "dsh": ">=0.2.0-rc.1 <0.3.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": ">=3.18.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
   "keywords": [
     "dsh",
     "deepseek-harness",
+    "dsh-plugin",
     "ollama",
     "vision",
+    "qwen3-vl",
+    "local-vision",
     "plugin"
   ],
+  "scripts": {
+    "cli": "node bin/cli.js",
+    "check": "node patch/apply.mjs --check"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

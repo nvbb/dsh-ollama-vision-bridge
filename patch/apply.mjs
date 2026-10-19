@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * dsh-ollama-vision-bridge — installer / re-applier (DSH >= 0.1.2-rc.1).
+ * dsh-ollama-vision-bridge — installer / re-applier (DSH >= 0.2.0-rc.1).
  *
  * One command performs the whole setup against $DSH_HOME (default ~/.dsh):
  *
@@ -9,11 +9,15 @@
  *      (lib/index.js) and its separate compile output
  *      (lib/types/commands.js) — so a text-only chat model receives a VL
  *      description of attached images from a local Ollama model (idempotent;
- *      a patch marker skips re-application). The request carries Ollama
- *      keep_alive so the VL model unloads from VRAM after the idle window.
- *   2. Append the `llm-pi-ai` provider section to settings.yaml (skipped if a
- *      section already exists).
- *   3. Write vision-bridge.yaml when absent (existing file is preserved).
+ *      a versioned helper marker refreshes old helper blocks in place). The
+ *      request carries Ollama keep_alive so the VL model unloads from VRAM
+ *      after the idle window.
+ *   2. Append the `llm-pi-ai` provider section to settings.yaml when that
+ *      legacy settings file exists (0.2.x profiles configure it in
+ *      cordis.patch.yml instead; write the vision-bridge row with
+ *      `bin/cli.js` / `npx dsh-ollama-vision-bridge setup`).
+ *   3. Write vision-bridge.yaml when absent (legacy fallback; new hosts should
+ *      use the vision-bridge profile entry).
  *   4. Report OLLAMA_MODELS / model visibility so a fresh machine gets the
  *      right hint.
  *
@@ -106,6 +110,33 @@ function hasRefusalAnchor(text) {
 	return ANCHOR_SINGLE.test(text) || ANCHOR_MULTI.test(text);
 }
 
+/** Remove a previously appended helper block (any version) from the lines. */
+function stripHelpers(lines) {
+	let start = -1;
+	let end = -1;
+	for (let i = 0; i < lines.length; i++) {
+		if (start < 0 && /DSH OLLAMA VISION BRIDGE PATCH v\d+ \(dsh-ollama-vision-bridge\)/.test(lines[i])) start = i;
+		if (start >= 0 && lines[i].includes("END dsh-ollama-vision-bridge helpers */")) {
+			end = i;
+			break;
+		}
+	}
+	if (start < 0 || end < 0 || end <= start) return false;
+	lines.splice(start, end - start + 1);
+	return true;
+}
+
+function writeFileAtomic(file, text) {
+	const tmp = `${file}.dsh-tmp`;
+	writeFileSync(tmp, text, "utf8");
+	renameSync(tmp, file);
+}
+
+function appendHelpers(text) {
+	const sep = text.endsWith("\n") ? "" : "\n";
+	return `${text}${sep}\n${HELPERS_LINES.join("\n")}\n`;
+}
+
 /** Patch one copy of dsh-api-session-controller's prompt admission. */
 function patchController(file) {
 	if (!existsSync(file)) {
@@ -115,45 +146,41 @@ function patchController(file) {
 	}
 	const text = readFileSync(file, "utf8");
 	if (text.includes(REGION_CALL)) {
-		if (!text.includes(MARKER)) {
-			// region already bridged from an earlier run, helpers missing — repair helpers only
-			writeFileSync(file, `${text}${text.endsWith("\n") ? "" : "\n"}\n${HELPERS_LINES.join("\n")}\n`, "utf8");
-			log(`helpers appended (${file})`);
-		} else {
+		if (text.includes(MARKER)) {
 			log(`already patched (${file})`);
+			return { ok: true, already: true };
 		}
-		return { ok: true, already: true };
+		// region bridged by an older helper block (v2 or missing marker): refresh helpers
+		const lines = text.split(/\r?\n/);
+		stripHelpers(lines);
+		writeFileAtomic(file, appendHelpers(lines.join("\n")));
+		log(`helpers refreshed (${MARKER}) (${file})`);
+		return { ok: true };
 	}
 	if (!hasRefusalAnchor(text)) {
 		log(`refusal anchor not found in ${file}`);
-		log("this dsh version changed its internals — update dsh-ollama-vision-bridge (expected DSH >= 0.1.2-rc.1 prompt handler in @deepseek-ai/dsh-api-session-controller)");
+		log("this dsh version changed its internals — update dsh-ollama-vision-bridge (expected DSH >= 0.2.0-rc.1 prompt handler in @deepseek-ai/dsh-api-session-controller)");
 		return { ok: false, reason: "anchors-not-found" };
 	}
 
-	let lines = text.split(/\r?\n/);
+	const lines = text.split(/\r?\n/);
 	const spliced = patchRefusal(lines);
 	if (!spliced.ok) {
 		log(`refusal anchor could not be rewritten in ${file}: ${spliced.reason}`);
 		return { ok: false, reason: spliced.reason };
 	}
 
-	let out = lines.join("\n");
-	if (!out.includes(MARKER)) {
-		const sep = out.endsWith("\n") ? "" : "\n";
-		out = `${out}${sep}\n${HELPERS_LINES.join("\n")}\n`;
-	}
-
-	const tmp = `${file}.dsh-tmp`;
-	writeFileSync(tmp, out, "utf8");
-	renameSync(tmp, file);
-	log(`patched ${file} (${spliced.style} refusal form + helpers)`);
+	stripHelpers(lines); // remove any stale helper block before appending the current one
+	const out = appendHelpers(lines.join("\n"));
+	writeFileAtomic(file, out);
+	log(`patched ${file} (${spliced.style} refusal form + helpers ${MARKER})`);
 	return { ok: true };
 }
 
 function writeSettings(home) {
 	const file = join(home, "settings.yaml");
 	if (!existsSync(file)) {
-		log(`settings.yaml not found at ${file} — skipping llm-pi-ai section (create it or run dsh once)`);
+		log(`settings.yaml not found at ${file} — skipping llm-pi-ai section (0.2.x profiles configure llm-pi-ai in cordis.patch.yml)`);
 		return false;
 	}
 	const text = readFileSync(file, "utf8");
@@ -207,7 +234,7 @@ function checkOllama(home) {
 	}
 	const found = manifests.some((m) => {
 		const names = walk(m);
-		return names.some((n) => /qwen3-vl|qwen2\.5vl|llava|minicpm|llama3\.2-vision|moondream|gemma/.test(n.toLowerCase()));
+		return names.some((n) => /qwen3|qwen2\.5vl|llava|minicpm|llama3\.2-vision|moondream|gemma/.test(n.toLowerCase()));
 	});
 	if (found) {
 		log("Ollama VL model manifest found under OLLAMA_MODELS — good");
@@ -215,7 +242,8 @@ function checkOllama(home) {
 	}
 	log("hint: no VL model manifest found under OLLAMA_MODELS" + (env ? ` (current OLLAMA_MODELS=${env})` : " (unset; default ~/.ollama/models)"));
 	log("if your models live elsewhere, set the user env var OLLAMA_MODELS to that directory and restart Ollama");
-	log("then: ollama pull qwen3-vl:8b  (or import your own GGUF + Modelfile)");
+	log("then pull or import a VL model (e.g. ollama pull qwen3-vl:8b) and point the bridge at it:");
+	log("  npx dsh-ollama-vision-bridge setup --model qwen3-vl:8b   (DSH >= 0.2.0)");
 	return false;
 }
 

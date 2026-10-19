@@ -18,12 +18,12 @@
  * 127.0.0.1:11434 with the configured VL model present.
  *
  * Why the env override below: the injected helpers resolve the bridge config
- * from settings.yaml via a dynamic `js-yaml` import. This test re-instantiates
- * the helper code inside a `data:` URL module, where bare specifiers cannot
- * resolve (ERR_UNSUPPORTED_RESOLVE_REQUEST), so the settings.yaml branch would
- * always fail silently and the test could never pass. Pointing the bridge at
- * the documented env override takes the same code path as the settings.yaml
- * config (baseURL/model/keepAlive fields) without the settings read.
+ * from the published globalThis config (plugin row) or legacy settings files.
+ * This test re-instantiates the helper code inside a `data:` URL module, where
+ * bare specifiers (js-yaml) cannot resolve (ERR_UNSUPPORTED_RESOLVE_REQUEST),
+ * so the legacy-settings branch would fail silently. The documented env
+ * override takes the same code path as the plugin row config (baseURL / model /
+ * keepAlive fields) without the settings read.
  */
 
 process.env.DSH_VISION_BRIDGE_MODEL ??= "qwen3-vl:8b";
@@ -42,16 +42,17 @@ const createUserMessage = (input) => ({
 	...input
 });
 
-const admitPromptContent = async (_attachments, content) =>
-	content.map((part) =>
-		part.type === "text"
-			? { type: "text", text: part.text }
-			: { type: "image", attachment: { attachmentId: "sha256:test", mediaType: part.mediaType, bytes: 68, width: 1, height: 1 } }
-	);
-
 const controller = {
 	ctx: {
 		attachments: {
+			// DSH >= 0.2.0: admitPromptContent lives on the attachments service.
+			async admitPromptContent(content) {
+				return content.map((part) =>
+					part.type === "text"
+						? { type: "text", text: part.text }
+						: { type: "image", attachment: { attachmentId: "sha256:test", mediaType: part.mediaType, bytes: 68, width: 1, height: 1 } }
+				);
+			},
 			async readImage(ref) {
 				return {
 					ref: { attachmentId: ref.attachmentId, mediaType: ref.mediaType },
@@ -83,7 +84,6 @@ const agent = {
 
 const prelude = `
 const createUserMessage = ${createUserMessage.toString()};
-const admitPromptContent = ${admitPromptContent.toString()};
 `;
 
 const code = `${prelude}\n${HELPERS_LINES.join("\n")}\n\nexport { dshOllamaAdmit, dshOllamaBridgeConfig, dshOllamaDescribe };\n`;
