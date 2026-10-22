@@ -13,7 +13,7 @@ DeepSeek Harness（DSH）插件（适配 **DSH ≥ 0.2.0-rc.1**，0.2.1-rc.2 实
 > it and the description is injected into the **same model step** — one send, one answer, no cloud,
 > no API key. Images stay in your message history; the VL model unloads after a short `keep_alive`
 > idle (VRAM cooling). Falls back to DSH's native rejection when Ollama is down. 中文文档如下。
-
+- [nvbb/dsh-ollama-vision-bridge](https://github.com/nvbb/dsh-ollama-vision-bridge) — Local Ollama VL image descriptions for text-only DSH models (qwen3-vl:8b default, VRAM cooling, no API key).
 ## 原理
 
 - 安装时（`patch/apply.mjs`）给 `@deepseek-ai/dsh-api-session-controller` 打一个幂等补丁。
